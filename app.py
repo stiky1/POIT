@@ -6,9 +6,8 @@ import math
 import time
 import configparser as ConfigParser
 import random
-
+import serial
 async_mode = None
-
 app = Flask(__name__)
 
 config = ConfigParser.ConfigParser()
@@ -17,7 +16,6 @@ myhost = config.get('mysqlDB', 'host')
 myuser = config.get('mysqlDB', 'user')
 mypasswd = config.get('mysqlDB', 'passwd')
 mydb = config.get('mysqlDB', 'db')
-print(myhost)
 
 
 app.config['SECRET_KEY'] = 'secret!'
@@ -28,44 +26,46 @@ thread_lock = Lock()
 
 def background_thread(args):
     count = 0  
-    dataCounter = 0 
     dataList = []  
-    db = MySQLdb.connect(host=myhost,user=myuser,passwd=mypasswd,db=mydb)          
+    db = MySQLdb.connect(host=myhost,user=myuser,passwd=mypasswd,db=mydb)
+    ser = serial.Serial('/dev/ttyACM0')
+    
     while True:
         if args:
-          A = dict(args).get('A')
           dbV = dict(args).get('db_value')
         else:
-          A = 1
-          dbV = 'nieco'  
-        #print A
-        print(dbV) 
-        print(args)  
-        socketio.sleep(2)
-        count += 1
-        dataCounter +=1
-        prem = random.random()
+          dbV = ''  
+         
+        socketio.sleep(1)
+  
+        values = ser.readline().decode().strip()
+        values = values.split(',')
+        
         if dbV == 'start':
-          dataDict = {
-            "t": time.time(),
-            "x": dataCounter,
-            "y": float(A)*prem}
-          dataList.append(dataDict)
+          if count == 0:
+            print('adasda')
+            socketio.emit('my_response',{'temperature':'START','humidity':'','light':'','count':''},namespace='/test')
+            
+          count += 1
+              
+          dataObject = {"temperature":values[0],"humidity":values[1],"light":values[2]}
+          dataList.append(dataObject)
+          socketio.emit('my_response', {'temperature':values[0],'humidity':values[1],'light':values[2],'count':count},namespace='/test')
+          
         else:
+          
           if len(dataList)>0:
-            print(str(dataList))
-            fuj = str(dataList).replace("'", "\"")
-            print(fuj)
-            cursor = db.cursor()
-            cursor.execute("SELECT MAX(id) FROM graph")
-            maxid = cursor.fetchone()
-            cursor.execute("INSERT INTO graph (id, hodnoty) VALUES (%s, %s)", (maxid[0] + 1, fuj))
-            db.commit()
-          dataList = []
-          dataCounter = 0
-        socketio.emit('my_response',
-                      {'data': float(A)*prem, 'count': count},
-                      namespace='/test')  
+              print('-----------stop------')
+              dataObjToStr = str(dataList).replace(",","\"");
+              cursor = db.cursor()
+              cursor.execute("INSERT INTO senzors (hodnoty) VALUES (%s)",(dataObjToStr,))
+              
+              db.commit()
+              dataList = []
+              count = 0
+              socketio.emit('my_response', {'temperature':'STOP','humidity':'','light':'','count':''},namespace='/test')
+
+          
     db.close()
 
 @app.route('/')
@@ -94,24 +94,19 @@ def dbdata(num):
   return str(rv[0])
     
 @socketio.on('my_event', namespace='/test')
-def test_message(message):   
-    session['receive_count'] = session.get('receive_count', 0) + 1 
-    session['A'] = message['value']    
+def test_message():   
     emit('my_response',
-         {'data': message['value'], 'count': session['receive_count']})
+         {'temperature':'START','humidity':'','light':'','count':''})
 
 @socketio.on('db_event', namespace='/test')
 def db_message(message):   
-#    session['receive_count'] = session.get('receive_count', 0) + 1 
     session['db_value'] = message['value']    
-#    emit('my_response',
-#         {'data': message['value'], 'count': session['receive_count']})
+
 
 @socketio.on('disconnect_request', namespace='/test')
 def disconnect_request():
-    session['receive_count'] = session.get('receive_count', 0) + 1
     emit('my_response',
-         {'data': 'Disconnected!', 'count': session['receive_count']})
+         {'temperature': 'Disconnected!','humidity':'','light':'', 'count': ''})
     disconnect()
 
 @socketio.on('connect', namespace='/test')

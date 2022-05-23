@@ -10,11 +10,22 @@
       var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
 
       socket.on('connect', function() {
-        socket.emit('my_event', {data: 'I\'m connected!', value: 1}); });
+        socket.emit('db_event', {value: 'stop'});
+        socket.emit('my_event'); });
 
       socket.on('my_response', function(msg) {
-        console.log(msg.data);
-        $('#log').append('Received #'+msg.count+': '+msg.data+'<br>').html(); });
+        console.log(msg);
+        if(msg.count === '') {
+          
+          if(msg.temperature === 'START') {
+            $('#log').empty();
+          }
+          $('#log').append(msg.temperature+'<br>').html();
+
+        } else {
+          $('#log').append(msg.count+'# ' +'Temperature: '+msg.temperature+' Humidity: '+msg.humidity+' Light: '+msg.light+'<br>').html(); 
+        }
+        });
 
       $('form#emit').submit(function(event) {
           socket.emit('my_event', {value: $('#emit_value').val()});
