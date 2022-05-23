@@ -7,6 +7,7 @@ import time
 import configparser as ConfigParser
 import random
 import serial
+import json
 async_mode = None
 app = Flask(__name__)
 
@@ -36,36 +37,41 @@ def background_thread(args):
         else:
           dbV = ''  
          
-        socketio.sleep(1)
+        socketio.sleep(2)
   
         values = ser.readline().decode().strip()
         values = values.split(',')
         
         if dbV == 'start':
           if count == 0:
-            print('adasda')
             socketio.emit('my_response',{'temperature':'START','humidity':'','light':'','count':''},namespace='/test')
             
-          count += 1
+          if len(values)>2:
+            count += 1
               
-          dataObject = {"temperature":values[0],"humidity":values[1],"light":values[2]}
-          dataList.append(dataObject)
-          socketio.emit('my_response', {'temperature':values[0],'humidity':values[1],'light':values[2],'count':count},namespace='/test')
+            dataObject = {"temperature":values[0],"humidity":values[1],"light":values[2]}
+            dataList.append(dataObject)
+            socketio.emit('my_response', {'temperature':values[0],'humidity':values[1],'light':values[2],'count':count},namespace='/test')
           
         else:
           
           if len(dataList)>0:
-              print('-----------stop------')
-              dataObjToStr = str(dataList).replace(",","\"");
+              print('--------stop------')
+              dataObjToStr = str(dataList).replace("'","\"");
               cursor = db.cursor()
               cursor.execute("INSERT INTO senzors (hodnoty) VALUES (%s)",(dataObjToStr,))
               
               db.commit()
+              socketio.emit('my_response', {'temperature':'STOP','humidity':'','light':'','count':''},namespace='/test') 
+              
+              file = open("static/data.txt","a+")
+              file.write("%s\r\n" %dataObjToStr)
+              file.close()
+              
               dataList = []
               count = 0
-              socketio.emit('my_response', {'temperature':'STOP','humidity':'','light':'','count':''},namespace='/test')
-
-          
+              
+                  
     db.close()
 
 @app.route('/')
@@ -85,21 +91,50 @@ def db():
   return str(rv)    
 
 @app.route('/dbdata/<string:num>', methods=['GET', 'POST'])
-def dbdata(num):
+def singleDbData(num):
   db = MySQLdb.connect(host=myhost,user=myuser,passwd=mypasswd,db=mydb)
   cursor = db.cursor()
-  print(num)
-  cursor.execute("SELECT hodnoty FROM  graph WHERE id=%s", num)
+  cursor.execute("SELECT hodnoty FROM senzors WHERE id=%s", (num,))
   rv = cursor.fetchone()
   return str(rv[0])
-    
+
+@app.route('/dbdata', methods=['GET', 'POST'])
+def allDbData():
+  db = MySQLdb.connect(host=myhost,user=myuser,passwd=mypasswd,db=mydb)
+  cursor = db.cursor()
+  cursor.execute("SELECT id FROM senzors")
+  response = []
+  for ids in cursor:
+      response.append(*ids)
+      
+  return json.dumps(response)
+
+@app.route('/fileData', methods=['GET', 'POST'])
+def allFileData():
+    fo = open("static/data.txt","r")
+    rows = fo.readlines()
+    return str(len(rows))
+
+@app.route('/fileData/<string:num>', methods=['GET', 'POST'])
+def singleFileData(num):
+    fo = open("static/data.txt","r")
+    rows = fo.readlines()
+    return rows[int(num)]
+
 @socketio.on('my_event', namespace='/test')
-def test_message():   
+def test_message(message):
+    ser = serial.Serial('/dev/ttyACM0')
+    print('---------Aplituda----------')
+    print(message['aplitude'])
+    print('---------------------------')
+
+    
+    ser.write(message['aplitude'].encode())
     emit('my_response',
          {'temperature':'START','humidity':'','light':'','count':''})
 
 @socketio.on('db_event', namespace='/test')
-def db_message(message):   
+def db_message(message):
     session['db_value'] = message['value']    
 
 
@@ -115,7 +150,6 @@ def test_connect():
     with thread_lock:
         if thread is None:
             thread = socketio.start_background_task(target=background_thread, args=session._get_current_object())
-   # emit('my_response', {'data': 'Connected', 'count': 0})
 
 
 @socketio.on('disconnect', namespace='/test')
